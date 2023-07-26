@@ -1,0 +1,394 @@
+---
+title: "Analisis de factores socioeconomicos"
+author: "Juan Segundo Tapia"
+date: "2023-07-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, messagge = FALSE, warning = FALSE, error = FALSE)
+```
+
+# ANALISIS DE FACTORES SOCIO ECONOMICOS EN LA ECONOMIA MUNDIAL
+
+En este trabajo analizaremos ciertos factores economicos que tienen incidencia en la formas en las que las sociedades se desarrollan. ¿Existe una correlacion entre la democracia y la riqueza de un país? Lo analizaremos en este proyecto
+
+Comenzamos importando los datasets que utilizaremos.
+
+```{r LIBRERIAS , include = FALSE, eval = TRUE}
+library(tidyverse)
+library(ggplot2)
+library(maps)
+library(dplyr)
+library(plotly)
+library(DT)
+library(purrr)
+library(factoextra)
+library(NbClust)
+library(tidyr)
+
+```
+
+## ¿QUÉ SIGNIFICA QUE UN PAÍS SEA RICO?¿ES LO MISMO UN PAIS RICO A UNO DESARROLLADO?
+
+Hay muchas definiciones de riqueza, dependiendo la institucion, tendremos diferentes resultados. Una forma de medir la riqueza puede ser en base al PBI Per Capita (GDP Per Capita) que es la valuacion de los bienes y servicios producidos dentro de un país dividido la cantidad de habitantes. Podriamos decir que un pais es rico si tiene un PBI Per Capita mayor a \$20,000 dolares. La desventaja de este indicador es que no toma en cuenta la desigualdad, la educacion, la infraestructura ni la salud.
+
+Otro concepto interesante es el Indice de Desarrollo Humano (HDI), que toma en cuenta factores educativos, sociales y economicos. Utilizaremos la definicion consecuente a el indicador, donde los paises con un indice de 0 a 0.550 tienen un desarrollo bajo; medio para aquellos entre 0.550 y 0.700; un desarrollo alto para los paises comprendidos entre 0.700 y 0.800; y muy alto para aquellos que superen el 0.800.
+
+```{r HDI, include = TRUE, eval = TRUE}
+
+#Human development index dataset
+human_development_index_2021 <- read_csv("human_development_index.csv") %>%
+  rename(HDI = `Human Development Index`, Country = Entity) %>%
+  mutate(
+    Development_level = ifelse(HDI >= 0.800, "Muy alto", 
+                               ifelse(HDI >= 0.700 & HDI < 0.800, "Alto",
+                                      ifelse(HDI >= 0.550 & HDI < 0.700, "Medio",
+                                             ifelse(HDI < 0.550, "Bajo", NA)))),
+    Development_level = factor(Development_level, levels = c("Muy alto", "Alto", "Medio", "Bajo")) 
+  ) %>%
+    mutate(Country = recode(Country, 
+                          "United States" = "USA",
+                          "United Kingdom" = "UK",
+                          "Czechia" = "Czech Republic",
+                          "Central African Republic" = "Central African Republic",
+                          "Congo" = "Republic of Congo",
+                          "Cote d'Ivoire" = "Ivory Coast")) %>%
+    filter(Year == 2021 ) %>% 
+    filter(!Country %in% c("Very high human development (UNDP)", "World",
+                        "Medium human development (UNDP)", "Low human development (UNDP)",
+                        "Latin America and the Caribbean (UNDP)", "High human development (UNDP)",
+                        "Europe and Central Asia (UNDP)", "East Asia and the Pacific (UNDP)",
+                        "Arab States (UNDP)")) 
+  
+
+# Obtengo mapa
+world_map <- map_data("world")
+
+# Combino los datos mediante un left_join()
+hdi_map_2021 <- left_join(world_map, human_development_index_2021, by = c("region" = "Country"))
+
+```
+
+### Paises según nivel de desarrollo
+
+Información del 2021
+
+```{r HDI_MAPA, include = TRUE, eval = TRUE}
+
+library(ggplot2)
+
+ggplot() + 
+  geom_map(data = hdi_map_2021, map = hdi_map_2021, aes(x = long, y = lat, map_id = region, fill = Development_level), color = "gray") + 
+  scale_fill_manual(values = c("Bajo" = "red", "Medio" = "orange", "Alto" = "lightgreen", "Muy alto" = "darkblue"), na.value = "white") +
+  theme_void()
+
+```
+
+Existen `sum(human_development_index_2021$Development_level == "Muy alto")` paises con un Índice de Desarrollo Humano Muy alto, los cuales podriamos considerar paises desarrollados.
+
+### Paises con mayor PBI Per Capita
+
+Estos son los paises con un PBI Per Capita superior a los \$20,000 dolares anuales.
+
+```{r PBI Per Capita, include = TRUE, eval = TRUE}
+
+gdp_per_capita_2018 <- read_csv("gdp-per-capita-maddison.csv") %>%
+  select(-`417485-annotations`) %>%
+  rename(Country = Entity) %>%
+  filter(Year == 2018, `GDP per capita` > 20000.00) %>%
+  filter(!Country %in% c("Western Offshoots (MPD)", "Western Europe (MPD)",
+                        "Eastern Europe (MPD)")) %>%
+  mutate(Country = recode(Country, "United States" = "USA",
+                          "United Kingdom" = "UK"))
+
+world_map <- map_data("world")
+
+gdp_per_capita_map <- left_join(world_map, gdp_per_capita_2018, by = c("region" = "Country"))
+
+```
+
+```{r Mapa PBI Per Capita, include = TRUE, eval = TRUE}
+
+library(ggplot2)
+
+ggplot() + 
+  geom_map(data = gdp_per_capita_map, map = gdp_per_capita_map, aes(x = long, y = lat, map_id = region, fill = `GDP per capita` )) + scale_fill_gradient(low = "lightblue", high = "darkblue") + theme_void()
+
+```
+
+Existen `nrow(gdp_per_capita_2018)` paises con un PBI Per Capita superior a \$20,000 dolares anuales, a los cuales podemos llamar países ricos
+
+## DEMOCRACIA Y RIQUEZA, ¿CÓMO SE RELACIONAN?
+
+Se ha impuesto en el mundo occidental un modelo de desarrollo que combina las instituciones democraticas un desarrollo economico estable, basado en el comercio global, y apertura economica.
+
+### Paises más democraticos
+
+```{r Democracia, include = TRUE, eval = TRUE}
+
+#Importo el dataset
+democracy_index_2022_1 <- read_csv("electoral-democracy-index.csv") %>%
+  select(-electdem_vdem_low_owid, -electdem_vdem_high_owid) %>%
+  rename(Country = Entity, Democracy_index = electdem_vdem_owid) %>%
+  filter(Year == 2022) %>%
+  mutate(Country = recode(Country,
+                          "United States" = "USA",
+                          "United Kingdom" = "UK",
+                          "Czechia" = "Czech Republic",
+                          "Central African Republic" = "Central African Republic",
+                          "Congo" = "Republic of Congo",
+                          "Cote d'Ivoire" = "Ivory Coast")) %>%
+  filter(!Country %in% c("World", "South America",
+                        "North America", "Europe",
+                        "Asia"))
+
+#Genero el gráfico
+world_map <- map_data("world")
+
+democracy_index_2022 <- left_join
+
+
+
+democracy_index_2022_1 <- read_csv("electoral-democracy-index.csv") %>%
+  select(-electdem_vdem_low_owid, -electdem_vdem_high_owid) %>%
+  rename(Country = Entity, Democracy_index = electdem_vdem_owid) %>%
+  mutate(Country = recode(Country,
+                          "United States" = "USA",
+                          "United Kingdom" = "UK",
+                          "Czechia" = "Czech Republic",
+                          "Central African Republic" = "Central African Republic",
+                          "Congo" = "Republic of Congo",
+                          "Cote d'Ivoire" = "Ivory Coast")) %>%
+  filter(!Country %in% c("World", "South America",
+                        "North America", "Europe",
+                        "Asia"))
+
+
+```
+
+```{r Tabla de índice de democracia, include = TRUE, eval = TRUE}
+
+datatable(democracy_index_2022_1)
+
+```
+
+```{r Mapa índice de Democracia, include = TRUE, eval = TRUE}
+
+library(ggplot2)
+
+ggplot() + 
+  geom_map(data = democracy_index_2022, map = democracy_index_2022, aes(x = long, y = lat, map_id = region, fill = Democracy_index)) + 
+  scale_fill_gradientn(colors = c("red", "orange", "darkblue"), values = c(0, 0.5, 1)) + 
+  theme_void()
+
+```
+
+### Relacion entre el nivel de desarrollo y el coeficiente de democracia
+
+```{r Democracia y Desarrollo , include = TRUE, eval = TRUE}
+
+data_pbi <- read_csv("gdp-per-capita-maddison.csv") %>%
+  filter(Year >= 1900 & Year <= 2018) %>%
+  select (-`417485-annotations`, -Entity) %>%
+  filter(!is.na(Code))
+
+data_democracia <- read_csv("electoral-democracy-index.csv") %>%
+  select(-electdem_vdem_low_owid, -electdem_vdem_high_owid, -Entity) %>%
+  rename(Democracy_index = electdem_vdem_owid) %>%
+  filter(Year >= 1900 & Year <= 2018) %>%
+  filter(!is.na(Code))
+
+democracy_gdp <- inner_join(data_democracia, data_pbi, by = c("Year","Code"))
+
+```
+
+```{r Grafico de Democracia y Desarrollo , include = TRUE, eval = TRUE}
+
+library(ggplot2)
+
+# Generacion del grafico
+ggplot(democracy_gdp, aes(x = Democracy_index, y = log(`GDP per capita`))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(x = "Índice de democracia", y = "Log(PBI per capita)") +
+  ggtitle("Correlación entre el índice de democracia y el logaritmo del PBI Per Capita entre los años 1900 y 2018") +
+  coord_cartesian(xlim = c(0, max(democracy_gdp$Democracy_index))) +
+  theme(plot.title = element_text(hjust = 0.5, size = rel(0.75)))
+
+
+```
+
+Vemos que no se puede sacar una clara conclusion de la inforamcion dada, esto puede tener muchos motivos: informacion sesgada, incompleta, o que simplemente no es una variable completamente relevante. En todo caso, el indice de correlacion es `cor(democracy_gdp$Democracy_index, log(democracy_gdp$`GDP per capita`))`
+
+## DESIGUALDAD: ¿Cómo se distribuye la riqueza?
+
+Como hemos visto, un pbi per capita alto no necesariamente índica un cierto nivel de desarrollo, aunque evidentemente hay cierta relación. Otro factor interesante para analizar respecto a los países es como se distribuye la riqueza.
+
+```{r desigualdad 2021}
+
+inequality <- read_csv("inequality.csv") %>%
+  rename(`Gini coefficient` = `Gini coefficient (before tax) (World Inequality Database)`,
+         `Top 0.1%`= `Income share of the richest 0.1% (before tax) (World Inequality Database)`,
+         `Top 1%` = `Income share of the richest 1% (before tax) (World Inequality Database)`,
+         `Top 10%` = `Income share of the richest 10% (before tax) (World Inequality Database)`,
+         `Poorest 50%` = `Income share of the poorest 50% (before tax) (World Inequality Database)`)
+
+gini2021 <- inequality %>%
+  filter(Year == 2021) %>%
+  summarise(total_na = sum(is.na(`Gini coefficient`)))
+
+print(paste("Existen", gini2021$total_na, "registros NA para el año 2021"))
+
+#Vemos que existen muchos registros NA para el año 2021, podriamos analizar el coeficiente de gini para cada pais en base al último valor disponible para cada pais, desde el 2010.
+
+gini <- inequality %>%
+  filter(Year >=2010 & Year <= 2022) %>% 
+  group_by(Country) %>%
+  filter(!is.na(`Gini coefficient`)) %>%
+  slice_max(order_by = Year)
+
+
+print(paste("Existen", nrow(gini), "registros de coeficiente gini entre los años", min(gini$Year), "y", max(gini$Year)))
+
+```
+
+### Tabla: Indice de desigualdad
+
+```{r desigualdad }
+
+datatable(gini, rownames =FALSE)
+
+
+```
+
+### Tabla: desigualdad por año
+
+Muestra el coeficiente gini promedio en el mundo entre los años 20000 y 2022
+
+```{r desigualdad por año}
+
+datatable(
+inequality %>%
+  filter(Year >=2000 & Year <= 2022) %>% 
+  group_by(Country) %>%
+  filter(!is.na(`Gini coefficient`)) %>%
+  group_by(Year) %>%
+  summarize(
+    "Average Gini coefficient" = mean(`Gini coefficient`),
+    "Average top 0.1%" = round(mean(`Top 0.1%`),3),
+    "Average top 1%" = round(mean(`Top 1%`),3),
+    "Average top 10%" = round(mean(`Top 10%`),3),
+    "Poorest 50%" = round(mean(`Poorest 50%`),3)
+  ), rownames = FALSE)
+
+
+```
+
+Se puede apreciar que en los últimos 22 años ha habido una tendencia a la suba de la desigualdad.
+
+
+# ANALISIS DE DATOS: ¿Cómo se clasifican los paises en base a sus estadisticas?
+Tomemos en cuenta los siguientes factores centrales, algunos de los cuales hemos cubrido anteriormente: el PBI Per Capita, el índice de democracia, la desigualdad medida a traves del coeficiente gini, la expectativa de vida y la mortalidad infantil.
+Para evitar datos NA, tomaremos el último dato disponible para cada país en los últimos 7 años.
+
+```{r junto los datasets}
+
+#GDP PP Per Capita dataset dataset ----
+gdp_per_capita_PPP_db <- read_csv("gdp-per-capita-worldbank.csv") %>%
+  filter(Year >= 2015 & Year <= 2022 & Code !="NA" & Code != "OWID_WRL") %>%
+  rename(`GDP Per Capita PPP` = `GDP per capita, PPP (constant 2017 international $)`) %>%
+  filter(!is.na(`GDP Per Capita PPP`)) %>%
+  slice_max(order_by = Year) %>%
+  select(`Code`, `GDP Per Capita PPP`)
+
+#Democracy Index dataset ----
+democracy_index_db <- read_csv("electoral-democracy-index.csv") %>%
+  filter(Year >= 2015 & Year <= 2022 & Code !="NA" & Code !="OWID_WRL") %>%
+  rename(`Democracy index` = electdem_vdem_owid) %>%
+  filter(!is.na(Year)) %>%
+  slice_max(order_by = Year) %>%
+  select(`Code`,`Democracy index`)
+
+#Life expectancy dataset ----
+life_expectancy_db <- read_csv("life-expectancy.csv") %>%
+  filter(Year >= 2015 & Year <= 2022 & Code !="NA" & Code != "OWID_WRL") %>%
+  rename(`Life expectancy` = `Life expectancy at birth (historical)`) %>%
+  filter(!is.na(`Life expectancy`)) %>%
+  slice_max(order_by = Year) %>%
+  select(`Code`,`Life expectancy`)
+
+#Child mortality dataset ----
+child_mortality_db <- read_csv("child-mortality.csv") %>%
+  filter(Year >= 2015 & Year <= 2022 & Code != "NA" & Code != "OWID_WRL") %>%
+  rename(`Child mortality` = `Mortality rate, under-5 (per 1,000 live births)`) %>%
+  filter(!is.na(`Child mortality`)) %>%
+  slice_max(order_by = Year) %>%
+  select(`Code`, `Child mortality`)
+
+#Inequality dataset ----
+inequality_db <- read_csv("inequality.csv") %>%
+  filter(Year >= 2015 & Year <= 2022 & Code != "NA" & Code != "OWID_WRL") %>%
+  filter(!is.na(`Gini coefficient`)) %>%
+  group_by(Code) %>%
+  slice_max(order_by = Year) %>%
+  ungroup() %>%
+  select(Code, `Gini coefficient`)
+
+
+#Human development index dataset ----
+human_development_index_db <- read_csv("human_development_index.csv") %>%
+  rename(HDI = `Human Development Index`) %>%
+  mutate(
+    `Nivel de desarrollo` = ifelse(HDI >= 0.800, "Muy alto", 
+                               ifelse(HDI >= 0.700 & HDI < 0.800, "Alto",
+                                      ifelse(HDI >= 0.550 & HDI < 0.700, "Medio",
+                                             ifelse(HDI < 0.550, "Bajo", NA)))),
+    `Nivel de desarrollo` = factor(Development_level, levels = c("Muy alto", "Alto", "Medio", "Bajo"))) %>%
+  filter(Year >= 2015 & Year <=2022 & Code !="NA" & Code != "OWID_WRL") %>%
+  filter(!is.na(HDI)) %>%
+  slice_max(order_by = Year) %>%
+  select(-Entity, -Year)
+
+
+#Dataset de analisis original ----
+Countries_information <- left_join(gdp_per_capita_PPP_db, democracy_index_db, by ="Code") %>%
+  left_join(., life_expectancy_db, by = "Code") %>%
+  left_join(., child_mortality_db, by = "Code") %>%
+  left_join(., inequality_db, by = "Code") %>%
+  left_join(., human_development_index_db, by = "Code") 
+
+#Dataset de analisis ----
+countries_data <- countries_information %>%
+  select()
+
+
+
+```
+
+
+
+```{r analisis de clusters}
+
+table(datosmacro$Development_level, useNA = "ifany")
+table
+
+#Como veo que tengo 10 datos que contienen valores NA, vamos a crear una clasificacion extra a nuestro dataset llamada "Nivel de desarrollo", las cuales va a tomar dos variables "Desarrollado", "No desarrollado".
+
+datosmacro <- datosmacro %>%
+  mutate(Desarrollado = ifelse(Development_level == "Muy alto", "Desarrollado", "No desarrollado"))
+
+```
+
+
+
+```{r analisis de clusters}
+
+demo <- read_csv("electoral-democracy-index.csv")
+child <- read_csv("child-mortality.csv")
+hdy <- read_csv("human_development_index.csv")
+gyny <- read_csv("inequality.csv")
+life <- read_csv("life-expectancy.csv")
+
+
+```
